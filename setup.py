@@ -4,7 +4,7 @@ DEPENDENCIES = ["Pillow"]
 
 setup(
         name="lid",
-        version="0.0.1",
+        version="0.0.2",
         author="sloum",
         install_requires=DEPENDENCIES,
         python_requires=">=3.6",
