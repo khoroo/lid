@@ -126,27 +126,26 @@ def error_diffusion_dither(image: Image) -> Image:
     new = new_image(width, height)
     new_pixels = new.load()
     print("Dither method: error diffusion\033[?25l")
-    for row in tqdm(range(0, height)):
-        for col in range(0, width):
-            current = image_copy.getpixel((col, row))
-            if current > 128:
-                res = 1
-                diff = -(255 - current)
-            else:
-                res = 0
-                diff = abs(0 - current)
-            mov = [[0, 1, 0.4375], [1, 1, 0.0625], [1, 0, 0.3125], [1, -1, 0.1875]]
-            for x in mov:
-                if row + x[0] >= height or col + x[1] >= width or col + x[1] <= 0:
-                    continue
-                p = image_copy.getpixel((col + x[1], row + x[0]))
-                p = round(diff * x[2] + p)
-                if p < 0:
-                    p = 0
-                elif p > 255:
-                    p = 255
-                i[col + x[1], row + x[0]] = p
-            new_pixels[col, row] = res
+    for row, col in tqdm([(row, col) for row in range(height) for col in range(width)]):
+        current = image_copy.getpixel((col, row))
+        if current > 128:
+            res = 1
+            diff = -(255 - current)
+        else:
+            res = 0
+            diff = abs(0 - current)
+        mov = [[0, 1, 0.4375], [1, 1, 0.0625], [1, 0, 0.3125], [1, -1, 0.1875]]
+        for x in mov:
+            if row + x[0] >= height or col + x[1] >= width or col + x[1] <= 0:
+                continue
+            p = image_copy.getpixel((col + x[1], row + x[0]))
+            p = round(diff * x[2] + p)
+            if p < 0:
+                p = 0
+            elif p > 255:
+                p = 255
+            i[col + x[1], row + x[0]] = p
+        new_pixels[col, row] = res
     return new
 
 
@@ -202,8 +201,8 @@ def main():
 
     make_path = lambda s: Path(f"{args.outfile}_{s}.{args.f}")
 
-    save_image(colorize(ordered_dither_4(image)), make_path("colorized"), args.q)
-    return 
+    # save_image(colorize(ordered_dither_4(image)), make_path("colorized"), args.q)
+    # return 
     match args.m:
         case "o4":
             save_image(ordered_dither_4(image), make_path("o4"), args.q)
