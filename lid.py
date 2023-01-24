@@ -4,12 +4,13 @@
 # licence: public domain - use it, improve it, share it!
 #########
 
-from PIL import Image
-import sys
-import os, os.path
+import argparse
+import os
+import os.path
 from random import randint
 from typing import Optional
-import argparse
+
+from PIL import Image
 
 
 class Dither:
