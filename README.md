@@ -2,6 +2,7 @@
 
 khoroo - added `setup.py` to allow for this to be installed via pipx
 
+
 _lo-fi image dithering_
 
 Lid performs fairly basic 1 bit image dithering. It converts an input image to grayscale and then dithers that image. It then optimizes the output and saves the file. The result is a reduced filesize, simple image, great for small page sizes.
