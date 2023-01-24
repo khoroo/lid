@@ -10,7 +10,7 @@ import os.path
 from pathlib import Path
 from random import randint
 from typing import Generator, Optional
-
+import itertools
 from PIL import Image
 from tqdm import tqdm
 
@@ -26,11 +26,13 @@ def colorize(image: Image) -> Image:
     ratio = 2
     ret = Image.new("RGB", (width * ratio, height * ratio))
     xy_generator = ((x, y) for x in range(width) for y in range(height))
+    image_data = list(image.getdata())
+    it_colors = itertools.cycle(((255, 0, 0), (0, 255, 0), (0, 0, 255)))
 
     data = [
-        (0, 0, 0)
-        for xy, pixel in zip(xy_generator, image.getdata())
-        for sq_xy in iter_square(*xy, ratio)
+        next(it_colors) if pixel == 1 else (255, 255, 255)
+        for xy, pixel in zip(xy_generator, image_data)
+        for _ in iter_square(*xy, ratio)
     ]
 
     ret.putdata(data, scale=1.0, offset=0.0)
@@ -116,40 +118,36 @@ def random_dither(image: Image, threshold: int) -> Image:
 
 
 def error_diffusion_dither(image: Image) -> Image:
-    image_copy = image.copy()
     width, height = image.size
+
+    image_copy = image.copy()
+    i = image_copy.load()
+
     new = new_image(width, height)
     new_pixels = new.load()
     print("Dither method: error diffusion\033[?25l")
     for row in tqdm(range(0, height)):
         for col in range(0, width):
-            new_pixels[col, row] = update_error(image, image_copy, row, col)
+            current = image_copy.getpixel((col, row))
+            if current > 128:
+                res = 1
+                diff = -(255 - current)
+            else:
+                res = 0
+                diff = abs(0 - current)
+            mov = [[0, 1, 0.4375], [1, 1, 0.0625], [1, 0, 0.3125], [1, -1, 0.1875]]
+            for x in mov:
+                if row + x[0] >= height or col + x[1] >= width or col + x[1] <= 0:
+                    continue
+                p = image_copy.getpixel((col + x[1], row + x[0]))
+                p = round(diff * x[2] + p)
+                if p < 0:
+                    p = 0
+                elif p > 255:
+                    p = 255
+                i[col + x[1], row + x[0]] = p
+            new_pixels[col, row] = res
     return new
-
-
-# Helper for error_diffusion_dither
-def update_error(image: Image, image_copy: Image, r: int, c: int) -> int:
-    i = image_copy.load()
-    width, height = image.size
-    current = image.getpixel((c, r))
-    if current > 128:
-        res = 1
-        diff = -(255 - current)
-    else:
-        res = 0
-        diff = abs(0 - current)
-    mov = [[0, 1, 0.4375], [1, 1, 0.0625], [1, 0, 0.3125], [1, -1, 0.1875]]
-    for x in mov:
-        if r + x[0] >= height or c + x[1] >= width or c + x[1] <= 0:
-            continue
-        p = image.getpixel((c + x[1], r + x[0]))
-        p = round(diff * x[2] + p)
-        if p < 0:
-            p = 0
-        elif p > 255:
-            p = 255
-        i[c + x[1], r + x[0]] = p
-    return res
 
 
 def domain_checker(t: str, a: int, b: int) -> int:
@@ -204,6 +202,8 @@ def main():
 
     make_path = lambda s: Path(f"{args.outfile}_{s}.{args.f}")
 
+    save_image(colorize(ordered_dither_4(image)), make_path("colorized"), args.q)
+    return 
     match args.m:
         case "o4":
             save_image(ordered_dither_4(image), make_path("o4"), args.q)
