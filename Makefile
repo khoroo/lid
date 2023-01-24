@@ -1,4 +1,7 @@
-.PHONY: lint clean
+.PHONY: install lint clean
+
+install:
+	pip install -r requirements.txt
 
 lint:
 	black --line-length 99 lid.py

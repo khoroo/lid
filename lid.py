@@ -7,150 +7,156 @@
 import argparse
 import os
 import os.path
+from pathlib import Path
 from random import randint
-from typing import Optional
+from typing import Generator, Optional
 
 from PIL import Image
+from tqdm import tqdm
 
 
-class Dither:
-    def __init__(
-        self, path: str, output_format: str, output_name: str, output_quality: int, threshold: int
-    ):
-        self.source_image = Image.open(path).convert("L")
-        self.width, self.height = self.source_image.size
-        self.pixel_count = self.width * self.height
-        self.new = self.create_image()
-        self.new_pixels = self.new.load()
-        self.output_format = output_format
-        self.output_name = output_name
-        self.output_quality = output_quality
-        self.threshold = threshold
+def iter_square(x: int, y: int, size: int) -> Generator[tuple[int, int], None, None]:
+    for dx in range(size):
+        for dy in range(size):
+            yield x + dx, y + dy
 
-        # used for printing progress
-        self.counter = 1
-        self.percent_val = 0
-        self.hash_val = 0
 
-    def save_file(self) -> None:
-        output_filename = "{}.{}".format(self.output_name, self.output_format.lower())
-        self.new.save(
-            output_filename, self.output_format.upper(), optimize=True, quality=self.output_quality
-        )
-        print("\033[20C\nFinished! ~ {}/{}\033[?25h".format(os.getcwd(), output_filename))
+def colorize(image: Image) -> Image:
+    (width, height) = image.size
+    ratio = 2
+    ret = Image.new("RGB", (width * ratio, height * ratio))
+    xy_generator = ((x, y) for x in range(width) for y in range(height))
 
-    # Default dithering
-    def ordered_dither_4(self) -> None:
-        dots = [[64, 128], [192, 0]]
-        print("Dither method: ordered (4 levels)\033[?25l")
-        for row in range(0, self.height):
-            for col in range(0, self.width):
-                dotrow = 1 if row % 2 else 0
-                dotcol = 1 if col % 2 else 0
-                px = self.get_pixel(col, row)
-                self.new_pixels[col, row] = int(px > dots[dotrow][dotcol])
-                self.update_progress()
-        self.save_file()
+    data = [
+        (0, 0, 0)
+        for xy, pixel in zip(xy_generator, image.getdata())
+        for sq_xy in iter_square(*xy, ratio)
+    ]
 
-    def ordered_dither_9(self) -> None:
-        dots = [[0, 196, 84], [168, 140, 56], [112, 28, 224]]
-        print("Dither method: ordered (9 levels)\033[?25l")
-        for row in range(0, self.height):
-            for col in range(0, self.width):
-                if not row % 3:
-                    dotrow = 2
-                elif not row % 2:
-                    dotrow = 1
-                else:
-                    dotrow = 0
+    ret.putdata(data, scale=1.0, offset=0.0)
 
-                if not col % 3:
-                    dotcol = 2
-                elif not col % 2:
-                    dotcol = 1
-                else:
-                    dotcol = 0
-                px = self.get_pixel(col, row)
-                self.new_pixels[col, row] = int(px > dots[dotrow][dotcol])
-                self.update_progress()
-        self.save_file()
+    return ret
 
-    def threshold_dither(self) -> None:
-        if not self.threshold:
-            px_list = list(self.source_image.getdata())
-            self.threshold = sum(px_list) // len(px_list)
-        print("Dither method: threshold (set to: {})\033[?25l".format(self.threshold))
-        for row in range(0, self.height):
-            for col in range(0, self.width):
-                px = self.get_pixel(col, row)
-                self.new_pixels[col, row] = int(px > self.threshold)
-                self.update_progress()
-        self.save_file()
 
-    def random_dither(self) -> None:
-        print("Dither method: random\033[?25l".format(self.threshold))
-        for row in range(0, self.height):
-            for col in range(0, self.width):
-                px = self.get_pixel(col, row)
-                rand = randint(1, 255)
-                self.new_pixels[col, row] = int(px > rand)
-                self.update_progress()
-        self.save_file()
+def save_image(image: Image, path: Path, quality: int) -> None:
+    image.save(str(path), optimize=True, quality=quality)
 
-    def error_diffusion_dither(self) -> None:
-        i = self.source_image.load()
-        print("Dither method: error diffusion\033[?25l")
-        for row in range(0, self.height):
-            for col in range(0, self.width):
-                self.new_pixels[col, row] = self.update_error(i, row, col)
-                self.update_progress()
-        self.save_file()
 
-    # Helper for error_diffusion_dither
-    def update_error(self, i: Image, r: int, c: int) -> int:
-        current = self.get_pixel(c, r)
-        if current > 128:
-            res = 1
-            diff = -(255 - current)
-        else:
-            res = 0
-            diff = abs(0 - current)
-        mov = [[0, 1, 0.4375], [1, 1, 0.0625], [1, 0, 0.3125], [1, -1, 0.1875]]
-        for x in mov:
-            if r + x[0] >= self.height or c + x[1] >= self.width or c + x[1] <= 0:
-                continue
-            p = self.get_pixel(c + x[1], r + x[0])
-            p = round(diff * x[2] + p)
-            if p < 0:
-                p = 0
-            elif p > 255:
-                p = 255
-            i[c + x[1], r + x[0]] = p
-        return res
+def new_image(width: int, height: int) -> Image:
+    return Image.new("1", (width, height))
 
-    def create_image(self) -> Image:
-        return Image.new("1", (self.width, self.height))
 
-    def get_pixel(self, col, row) -> Optional[int]:
-        if col > self.width or row > self.height:
-            return None
-        return self.source_image.getpixel((col, row))
+def ordered_dither_4(image: Image) -> Image:
+    width, height = image.size
+    new = new_image(*image.size)
+    new_pixels = new.load()
+    dots = [[64, 128], [192, 0]]
+    print("Dither method: ordered (4 levels)\033[?25l")
+    for row in tqdm(range(0, height)):
+        for col in range(0, width):
+            dotrow = 1 if row % 2 else 0
+            dotcol = 1 if col % 2 else 0
+            px = image.getpixel((col, row))
+            new_pixels[col, row] = int(px > dots[dotrow][dotcol])
+    return new
 
-    def update_progress(self) -> None:
-        self.counter += 1
-        new_percent_val = round(self.counter / self.pixel_count * 100)
-        new_hash_val = round(self.counter / self.pixel_count * 10)
-        if new_percent_val != self.percent_val or new_hash_val != self.hash_val:
-            print("\r{:>3}% |{:<10}|".format(new_percent_val, "#" * new_hash_val), end="")
-            self.percent_val = new_percent_val
-            self.hash_val = new_hash_val
+
+def ordered_dither_9(image: Image) -> Image:
+    width, height = image.size
+    new = new_image(width, height)
+    new_pixels = new.load()
+    dots = [[0, 196, 84], [168, 140, 56], [112, 28, 224]]
+    print("Dither method: ordered (9 levels)\033[?25l")
+    for row in tqdm(range(0, height)):
+        for col in range(0, width):
+            if not row % 3:
+                dotrow = 2
+            elif not row % 2:
+                dotrow = 1
+            else:
+                dotrow = 0
+
+            if not col % 3:
+                dotcol = 2
+            elif not col % 2:
+                dotcol = 1
+            else:
+                dotcol = 0
+            px = image.getpixel((col, row))
+            new_pixels[col, row] = int(px > dots[dotrow][dotcol])
+    return new
+
+
+def threshold_dither(image: Image, threshold) -> Image:
+    width, height = image.size
+    new = new_image(width, height)
+    new_pixels = new.load()
+    if not threshold:
+        px_list = list(image.getdata())
+        threshold = sum(px_list) // len(px_list)
+    print("Dither method: threshold (set to: {})\033[?25l".format(threshold))
+    for row in tqdm(range(0, height)):
+        for col in range(0, width):
+            px = image.getpixel((col, row))
+            new_pixels[col, row] = int(px > threshold)
+    return new
+
+
+def random_dither(image: Image, threshold: int) -> Image:
+    width, height = image.size
+    new = new_image(width, height)
+    new_pixels = new.load()
+    print("Dither method: random\033[?25l".format(threshold))
+    for row in tqdm(range(0, height)):
+        for col in range(0, width):
+            px = image.getpixel((col, row))
+            rand = randint(1, 255)
+            new_pixels[col, row] = int(px > rand)
+    return new
+
+
+def error_diffusion_dither(image: Image) -> Image:
+    image_copy = image.copy()
+    width, height = image.size
+    new = new_image(width, height)
+    new_pixels = new.load()
+    print("Dither method: error diffusion\033[?25l")
+    for row in tqdm(range(0, height)):
+        for col in range(0, width):
+            new_pixels[col, row] = update_error(image, image_copy, row, col)
+    return new
+
+
+# Helper for error_diffusion_dither
+def update_error(image: Image, image_copy: Image, r: int, c: int) -> int:
+    i = image_copy.load()
+    width, height = image.size
+    current = image.getpixel((c, r))
+    if current > 128:
+        res = 1
+        diff = -(255 - current)
+    else:
+        res = 0
+        diff = abs(0 - current)
+    mov = [[0, 1, 0.4375], [1, 1, 0.0625], [1, 0, 0.3125], [1, -1, 0.1875]]
+    for x in mov:
+        if r + x[0] >= height or c + x[1] >= width or c + x[1] <= 0:
+            continue
+        p = image.getpixel((c + x[1], r + x[0]))
+        p = round(diff * x[2] + p)
+        if p < 0:
+            p = 0
+        elif p > 255:
+            p = 255
+        i[c + x[1], r + x[0]] = p
+    return res
 
 
 def domain_checker(t: str, a: int, b: int) -> int:
     # domain [a, b]
-    if not t.isnumeric(t) or not (a <= (ret := int(t)) <= b):
+    if not t.isnumeric(t) or not (a <= int(t) <= b):
         raise argparse.ArgumentTypeError(f"{t} not in domain [{a}, {b}]")
-    return ret
+    return t
 
 
 def path_checker(t: str) -> str:
@@ -176,14 +182,14 @@ def main():
     )
     parser.add_argument(
         "-q",
-        type=lambda t: domain_checker(t, 1, 100),
+        type=int,
         default=90,
         help="image quality. defaults to: 90. only has effect on png/jpg",
     )
     parser.add_argument(
         "-t",
         default=None,
-        type=lambda t: domain_checker(t, 0, 255),
+        type=int,
         help="threshold. default: image average tone. onls has effect in mode 't'",
     )
 
@@ -194,30 +200,27 @@ def main():
 
     args = parser.parse_args()
 
-    d = Dither(args.infile, args.f, args.outfile, args.q, args.t)
+    image = Image.open(str(args.infile)).convert("L")
+
+    make_path = lambda s: Path(f"{args.outfile}_{s}.{args.f}")
+
     match args.m:
         case "o4":
-            d.ordered_dither_4()
-        case "09":
-            d.ordered_dither_9()
+            save_image(ordered_dither_4(image), make_path("o4"), args.q)
+        case "o9":
+            save_image(ordered_dither_9(image), make_path("o9"), args.q)
         case "e":
-            d.error_diffusion_dither()
+            save_image(error_diffusion_dither(image), make_path("e"), args.q)
         case "t":
-            d.threshold_dither()
+            save_image(threshold_dither(image, args.t), make_path("t"), args.q)
         case "r":
-            d.random_dither()
+            save_image(random_dither(image, args.t), make_path("r"), args.q)
         case "a":
-            name = args.outfile
-            d = Dither(args.infile, args.f, f"{name}_o4", args.q, args.t)
-            d.ordered_dither_4()
-            d2 = Dither(args.infile, args.f, f"{name}_o9", args.q, args.t)
-            d2.ordered_dither_9()
-            d3 = Dither(args.infile, args.f, f"{name}_t", args.q, args.t)
-            d3.threshold_dither()
-            d4 = Dither(args.infile, args.f, f"{name}_e", args.q, args.t)
-            d4.error_diffusion_dither()
-            d5 = Dither(args.infile, args.f, f"{name}_r", args.q, args.t)
-            d5.random_dither()
+            save_image(ordered_dither_4(image), make_path("o4"), args.q)
+            save_image(ordered_dither_9(image), make_path("o9"), args.q)
+            save_image(threshold_dither(image, args.t), make_path("t"), args.q)
+            save_image(error_diffusion_dither(image), make_path("e"), args.q)
+            save_image(random_dither(image, args.t), make_path("r"), args.q)
 
 
 if __name__ == "__main__":
